@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.npm-cache/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+__pycache__/
+*.py[cod]
+.env*
+!.env.example
+*.log
