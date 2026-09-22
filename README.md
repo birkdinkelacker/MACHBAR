@@ -1,12 +1,13 @@
 # MACHBAR
 
-Responsive Website mit React/Vite und schlankem Python-Backend (Standardbibliothek + SQLite). Öffentliche Kontaktadresse: [info.machbar@gmx.de](mailto:info.machbar@gmx.de).
+Responsive Website mit React/Vite und schlankem Python-Backend (SQLite und Pillow für die Bildverarbeitung). Öffentliche Kontaktadresse: [info.machbar@gmx.de](mailto:info.machbar@gmx.de).
 
 ## Lokal starten
 
 Node.js 20+ und Python 3.10+ werden benötigt. In zwei Terminals:
 
 ```powershell
+python -m pip install -r backend/requirements.txt
 python backend/server.py
 ```
 
@@ -31,9 +32,11 @@ Der Admin wird beim ersten Start mit diesen Werten angelegt. Registrierungen üb
 
 ## Anfrageablauf
 
-Unter `/#/anfrage` führt ein Formular durch Leistung, Ort, Arbeiten, Umfang, Termin, ergänzende Angaben, Kontakt und eine bearbeitbare Zusammenfassung. Die Fragen passen sich der Leistung an; beim Umzug wird auch der Zielort erfasst. Eine Vorauswahl über die Leistungskarten der Startseite wird übernommen.
+Unter `/#/anfrage` führt ein Formular durch Leistungen, Ort, Umfang, Termin, ergänzende Angaben, Kontakt und eine bearbeitbare Zusammenfassung mit optionalem Foto-Upload. 35 konkrete Leistungen können bereichsübergreifend kombiniert werden. Suche, Bereichsfilter und Auswahlchips erleichtern die Auswahl. Die Leistungskarten der Startseite öffnen den passenden Bereich. Angaben zum Umfang werden je ausgewähltem Bereich erfasst, der Zielort nur bei Umzug oder Möbeltransport.
 
-Anfragen sind als Gast oder mit Kundenkonto möglich. Entwürfe bleiben im aktuellen Browser-Tab bis zum erfolgreichen Absenden erhalten. Alle Antworten werden sowohl als lesbare Beschreibung für die Portale als auch strukturiert in SQLite gespeichert. Beim Start ergänzt das Backend die dafür benötigte Spalte automatisch in bestehenden Datenbanken.
+Anfragen sind als Gast oder mit Kundenkonto möglich. Textentwürfe bleiben im aktuellen Browser-Tab bis zum erfolgreichen Absenden erhalten. Fotos bleiben bis zum Absenden nur im Arbeitsspeicher und müssen nach Neuladen oder Verlassen der Seite erneut ausgewählt werden. Alle Antworten werden als lesbare Beschreibung für die Portale und strukturiert in SQLite gespeichert. Beim Start ergänzt das Backend die erforderlichen Tabellen automatisch in bestehenden Datenbanken.
+
+Bis zu 6 Fotos (JPG, PNG, WebP; jeweils höchstens 5 MB und 20 Megapixel) werden zusammen mit dem Auftrag gespeichert. Pillow prüft die Bilder, berücksichtigt ihre Ausrichtung, begrenzt die lange Seite auf 2400 Pixel und speichert JPEGs ohne ursprüngliche Metadaten. Bilder liegen als BLOBs in der SQLite-Datenbank und werden über authentifizierte Endpunkte entsprechend den Auftragsrechten ausgeliefert. Die Portale zeigen Vorschaubilder mit Vergrößerung. Ist ein Bild ungültig, wird die gesamte Anfrage abgewiesen; es entsteht kein Teilauftrag. Ein vorgeschalteter Proxy muss für `/api/jobs` mindestens 42 MiB Request-Größe zulassen.
 
 Prüfungen: `node --test src/requestFlow.test.js`, `python -m unittest backend.test_api` und `npm run build`. Die API-Tests verwenden eine separate Testdatenbank.
 

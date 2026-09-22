@@ -1,4 +1,4 @@
-export const SERVICES = {
+export const GROUPS = {
   'Entrümpelung': {
     description: 'Wohnung, Keller oder einzelne Gegenstände', icon: 'boxes',
     question: 'Was soll entrümpelt werden?',
@@ -64,66 +64,63 @@ export const SERVICES = {
   },
 }
 
-export const STEPS = ['Leistung', 'Ort', 'Arbeiten', 'Umfang', 'Termin', 'Details', 'Kontakt', 'Übersicht']
+const catalog = {
+  Entrümpelung: ['Wohnung entrümpeln', 'Haus entrümpeln', 'Keller oder Dachboden räumen', 'Garage räumen', 'Möbel und Sperrmüll entsorgen', 'Gewerberäume räumen'],
+  Reinigung: ['Wohnungsreinigung', 'Treppenhausreinigung', 'Fensterreinigung', 'Büro- und Gewerbereinigung', 'Bauendreinigung', 'Terrassen- und Hofreinigung'],
+  Renovierung: ['Wände und Decken streichen', 'Tapezieren', 'Laminat oder Vinyl verlegen', 'Wände ausbessern', 'Tapeten entfernen', 'Silikonfugen erneuern'],
+  Gartenpflege: ['Rasen mähen', 'Hecken schneiden', 'Beete pflegen', 'Laub entfernen', 'Garten aufräumen', 'Grünschnitt entsorgen'],
+  Hausmeisterservice: ['Objektkontrolle', 'Kleinreparaturen', 'Möbel montieren', 'Mülltonnenservice', 'Winterdienst', 'Regelmäßige Objektbetreuung'],
+  Umzug: ['Kompletter Umzug', 'Möbeltransport', 'Tragehilfe', 'Umzugskartons packen'],
+  Sonstiges: ['Anderes Anliegen'],
+}
+export const SERVICES = Object.fromEntries(Object.entries(catalog).flatMap(([group,labels])=>labels.map(label=>[label,{group,icon:GROUPS[group].icon}])))
+export const STEPS = ['Leistungen', 'Ort', 'Umfang', 'Termin', 'Details', 'Kontakt', 'Übersicht & Fotos']
 export const TIMINGS = ['So bald wie möglich', 'In den nächsten 2 Wochen', 'In den nächsten 1–3 Monaten', 'An einem bestimmten Tag', 'Ich bin flexibel']
-export const EMPTY_FORM = {category:'', postal_code:'', city:'', address:'', work:[], amount:'', detail:'', destination_postal_code:'', destination_city:'', timing:'', desired_date:'', description:'', contact_name:'', contact_email:''}
+export const EMPTY_FORM = {services:[],scopes:{},postal_code:'',city:'',address:'',destination_postal_code:'',destination_city:'',timing:'',desired_date:'',description:'',contact_name:'',contact_email:''}
+export const selectedGroups = form => [...new Set(form.services.map(name=>SERVICES[name]?.group).filter(Boolean))]
+export const needsDestination = form => form.services.some(name=>['Kompletter Umzug','Möbeltransport'].includes(name))
 
-export function selectService(form, category) {
-  if (form.category === category) return form
-  return {...form, category, work:[], amount:'', detail:'', destination_postal_code:'', destination_city:''}
+export function selectService(form, name) {
+  if (!Object.hasOwn(SERVICES,name)) return form
+  const services = form.services.includes(name) ? form.services.filter(x=>x!==name) : [...form.services,name]
+  const next={...form,services}
+  next.scopes=Object.fromEntries(selectedGroups(next).map(group=>[group,form.scopes[group]||{amount:'',detail:''}]))
+  if(!needsDestination(next)){next.destination_postal_code='';next.destination_city=''}
+  return next
 }
 
 export function validateStep(step, form, user, today) {
-  if (step === 0 && !SERVICES[form.category]) return 'Bitte wähle eine Leistung aus.'
-  if (step === 1) {
-    if (!/^\d{5}$/.test(form.postal_code)) return 'Bitte gib eine fünfstellige Postleitzahl ein.'
-    if (form.city.trim().length < 2) return 'Bitte gib den Ort des Auftrags ein.'
+  if(step===0 && (!form.services.length || form.services.some(name=>!Object.hasOwn(SERVICES,name)))) return 'Bitte wähle mindestens eine Leistung aus.'
+  if(step===1){
+    if(!/^\d{5}$/.test(form.postal_code))return 'Bitte gib eine fünfstellige Postleitzahl ein.'
+    if(form.city.trim().length<2)return 'Bitte gib den Ort des Auftrags ein.'
+    if(needsDestination(form)&&(!/^\d{5}$/.test(form.destination_postal_code)||form.destination_city.trim().length<2))return 'Bitte gib die fünfstellige PLZ und den Ort des Umzugsziels ein.'
   }
-  if (step === 2 && (!form.work.length || form.work.some(work=>!SERVICES[form.category]?.choices.includes(work)))) return 'Bitte wähle mindestens eine passende Arbeit aus.'
-  if (step === 3) {
-    if (form.amount && (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0 || Number(form.amount) > 1000000)) return 'Bitte gib eine gültige Größe an oder lasse die Schätzung frei.'
-    if (!SERVICES[form.category]?.detailChoices.includes(form.detail)) return 'Bitte wähle die passende Angabe aus.'
-    if (form.category === 'Umzug' && (!/^\d{5}$/.test(form.destination_postal_code) || form.destination_city.trim().length < 2)) return 'Bitte gib die fünfstellige PLZ und den Ort des Umzugsziels ein.'
+  if(step===2)for(const group of selectedGroups(form)){
+    const scope=form.scopes[group]||{}
+    if(scope.amount&&(!Number.isFinite(Number(scope.amount))||Number(scope.amount)<=0||Number(scope.amount)>1000000))return `${group}: Bitte gib eine gültige Größe an oder lasse die Schätzung frei.`
+    if(scope.detail&&!GROUPS[group].detailChoices.includes(scope.detail))return `${group}: Bitte prüfe deine Auswahl.`
   }
-  if (step === 4) {
-    if (!TIMINGS.includes(form.timing)) return 'Bitte wähle einen Zeitraum aus.'
-    if (form.timing === 'An einem bestimmten Tag') {
-      const date = new Date(form.desired_date+'T12:00:00Z')
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(form.desired_date) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0,10)!==form.desired_date || form.desired_date < today) return 'Bitte wähle einen heutigen oder zukünftigen Termin.'
+  if(step===3){
+    if(!TIMINGS.includes(form.timing))return 'Bitte wähle einen Zeitraum aus.'
+    if(form.timing==='An einem bestimmten Tag'){
+      const date=new Date(form.desired_date+'T12:00:00Z')
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(form.desired_date)||!Number.isFinite(date.getTime())||date.toISOString().slice(0,10)!==form.desired_date||form.desired_date<today)return 'Bitte wähle einen heutigen oder zukünftigen Termin.'
     }
   }
-  if (step === 5 && form.category === 'Sonstiges' && form.description.trim().length < 15) return 'Beschreibe dein Anliegen bitte mit mindestens 15 Zeichen.'
-  if (step === 6 && !user) {
-    if (form.contact_name.trim().length < 2) return 'Bitte gib deinen Namen ein.'
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contact_email.trim())) return 'Bitte gib eine gültige E-Mail-Adresse ein.'
+  if(step===4&&form.services.includes('Anderes Anliegen')&&form.description.trim().length<15)return 'Beschreibe dein weiteres Anliegen bitte mit mindestens 15 Zeichen.'
+  if(step===5&&!user){
+    if(form.contact_name.trim().length<2)return 'Bitte gib deinen Namen ein.'
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contact_email.trim()))return 'Bitte gib eine gültige E-Mail-Adresse ein.'
   }
   return ''
 }
 
-export function buildPayload(form, user) {
-  const config = SERVICES[form.category]
-  const date = form.timing === 'An einem bestimmten Tag' ? form.desired_date : ''
-  const details = {
-    work: form.work,
-    amount: form.amount ? `${form.amount} ${config.unit}` : '',
-    detail_label: config.detailLabel,
-    detail: form.detail,
-    timing: form.timing,
-    destination: form.category === 'Umzug' ? `${form.destination_postal_code} ${form.destination_city.trim()}` : '',
-    notes: form.description.trim(),
-  }
-  const description = [
-    `Arbeiten: ${details.work.join(', ')}`,
-    details.amount && `${config.amountLabel}: ${details.amount}`,
-    `${details.detail_label} ${details.detail}`,
-    details.destination && `Umzugsziel: ${details.destination}`,
-    `Zeitraum: ${details.timing}${date ? ` (${date})` : ''}`,
-    details.notes && `Zusätzliche Angaben: ${details.notes}`,
-  ].filter(Boolean).join('\n')
-  return {
-    category:form.category, title:`${form.category}: ${form.work.join(', ')}`.slice(0,120),
-    description, postal_code:form.postal_code, city:form.city.trim(), address:form.address.trim(),
-    desired_date:date, contact_name:user?.name || form.contact_name.trim(), contact_email:user?.email || form.contact_email.trim(),
-    details,
-  }
+export function buildPayload(form,user){
+  const groups=selectedGroups(form)
+  const date=form.timing==='An einem bestimmten Tag'?form.desired_date:''
+  const scopes=groups.map(group=>({group,amount:form.scopes[group]?.amount?`${form.scopes[group].amount} ${GROUPS[group].unit}`:'',detail_label:GROUPS[group].detailLabel,detail:form.scopes[group]?.detail||''}))
+  const details={work:form.services,services:form.services,scopes,timing:form.timing,destination:needsDestination(form)?`${form.destination_postal_code} ${form.destination_city.trim()}`:'',notes:form.description.trim()}
+  const description=[`Leistungen: ${form.services.join(', ')}`,...scopes.filter(s=>s.amount||s.detail).map(s=>`${s.group}: ${[s.amount,s.detail&&`${s.detail_label} ${s.detail}`].filter(Boolean).join(' · ')}`),details.destination&&`Zielort: ${details.destination}`,`Zeitraum: ${details.timing}${date?` (${date})`:''}`,details.notes&&`Zusätzliche Angaben: ${details.notes}`].filter(Boolean).join('\n')
+  return {category:groups.length===1?groups[0]:'Mehrere Leistungen',title:(form.services.length>2?`${form.services[0]} + ${form.services.length-1} weitere Leistungen`:form.services.join(' & ')).slice(0,120),description,postal_code:form.postal_code,city:form.city.trim(),address:form.address.trim(),desired_date:date,contact_name:user?.name||form.contact_name.trim(),contact_email:user?.email||form.contact_email.trim(),details}
 }

@@ -1,4 +1,7 @@
-"""Small dependency-free MACHBAR API. Run with: python backend/server.py"""
+"""MACHBAR API with SQLite and validated photo uploads."""
+import base64
+import binascii
+import io
 import hashlib
 import hmac
 import json
@@ -6,6 +9,8 @@ import mimetypes
 import os
 import secrets
 import sqlite3
+import warnings
+from PIL import Image, ImageOps, UnidentifiedImageError
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,6 +22,10 @@ DB = Path(os.environ.get('MACHBAR_DB', ROOT / 'machbar.db'))
 HOST = os.environ.get('MACHBAR_HOST', '127.0.0.1')
 PORT = int(os.environ.get('MACHBAR_PORT', '8000'))
 STATUSES = {'open', 'assigned', 'in_progress', 'done'}
+MAX_PHOTOS = 6
+MAX_PHOTO_BYTES = 5 * 1024 * 1024
+MAX_JOB_PAYLOAD = 42 * 1024 * 1024
+Image.MAX_IMAGE_PIXELS = 20_000_000
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -56,6 +65,11 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_jobs_customer ON jobs(customer_id);
         CREATE INDEX IF NOT EXISTS idx_jobs_provider ON jobs(provider_id);
+        CREATE TABLE IF NOT EXISTS job_photos (
+            id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+            name TEXT NOT NULL, mime TEXT NOT NULL, data BLOB NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_photos_job ON job_photos(job_id);
         ''')
         if 'details_json' not in {row['name'] for row in db.execute('PRAGMA table_info(jobs)')}:
             db.execute("ALTER TABLE jobs ADD COLUMN details_json TEXT NOT NULL DEFAULT '{}'")
@@ -75,9 +89,11 @@ def public_user(row):
     return {key: row[key] for key in ('id', 'email', 'name', 'company', 'role')}
 
 
-def public_job(row):
+def public_job(row, db):
     job = dict(row)
     job['details'] = json.loads(job.pop('details_json'))
+    job['photos'] = [{'id': photo['id'], 'name': photo['name'], 'url': f"/api/jobs/{job['id']}/photos/{photo['id']}"}
+                     for photo in db.execute('SELECT id,name FROM job_photos WHERE job_id=? ORDER BY id', (job['id'],))]
     return job
 
 
@@ -92,10 +108,74 @@ def request_details(value):
             raise ValueError('Ungültige Auftragsdetails.')
         result[key] = field.strip()
     work = value.get('work', [])
-    if not isinstance(work, list) or len(work) > 20 or any(not isinstance(item, str) or len(item) > 150 for item in work):
+    if not isinstance(work, list) or len(work) > 50 or any(not isinstance(item, str) or len(item) > 150 for item in work):
         raise ValueError('Ungültige Auswahl der Arbeiten.')
     result['work'] = work
+    if 'services' in value:
+        services = value['services']
+        if not isinstance(services, list) or not 1 <= len(services) <= 50 or any(not isinstance(item, str) or not item.strip() or len(item) > 150 for item in services):
+            raise ValueError('Ungültige Leistungsauswahl.')
+        result['services'] = list(dict.fromkeys(services))
+    if 'scopes' in value:
+        scopes = value['scopes']
+        if not isinstance(scopes, list) or len(scopes) > 10:
+            raise ValueError('Ungültige Angaben zum Umfang.')
+        result['scopes'] = []
+        for scope in scopes:
+            if not isinstance(scope, dict):
+                raise ValueError('Ungültige Angaben zum Umfang.')
+            clean = {}
+            for key, limit in {'group': 80, 'amount': 40, 'detail_label': 150, 'detail': 150}.items():
+                field = scope.get(key, '')
+                if not isinstance(field, str) or len(field) > limit:
+                    raise ValueError('Ungültige Angaben zum Umfang.')
+                clean[key] = field.strip()
+            result['scopes'].append(clean)
     return json.dumps(result, ensure_ascii=False) if value else '{}'
+
+
+def prepare_photos(photos):
+    if not isinstance(photos, list) or len(photos) > MAX_PHOTOS:
+        raise ValueError('Bitte höchstens 6 Fotos hochladen.')
+    prepared = []
+    for photo in photos:
+        if not isinstance(photo, dict) or not isinstance(photo.get('name'), str) or not 1 <= len(photo['name']) <= 150:
+            raise ValueError('Ungültiger Foto-Dateiname.')
+        data = photo.get('data', '')
+        if not isinstance(data, str) or len(data) > (MAX_PHOTO_BYTES + 2) // 3 * 4 + 40:
+            raise ValueError('Ein Foto darf höchstens 5 MB groß sein.')
+        prefix, separator, encoded = data.partition(',')
+        if not separator or prefix not in ('data:image/jpeg;base64', 'data:image/png;base64', 'data:image/webp;base64'):
+            raise ValueError('Bitte JPG-, PNG- oder WebP-Fotos hochladen.')
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+            if not raw or len(raw) > MAX_PHOTO_BYTES:
+                raise ValueError('Ein Foto darf höchstens 5 MB groß sein.')
+            with warnings.catch_warnings():
+                warnings.simplefilter('error', Image.DecompressionBombWarning)
+                with Image.open(io.BytesIO(raw)) as image:
+                    if image.format not in ('JPEG', 'PNG', 'WEBP'):
+                        raise ValueError('Bitte JPG-, PNG- oder WebP-Fotos hochladen.')
+                    image.verify()
+                with Image.open(io.BytesIO(raw)) as image:
+                    normalized = ImageOps.exif_transpose(image)
+                    normalized.thumbnail((2400, 2400))
+                    rgba = normalized.convert('RGBA')
+                    clean = Image.new('RGB', rgba.size, 'white')
+                    clean.paste(rgba, mask=rgba.getchannel('A'))
+                    output = io.BytesIO()
+                    clean.save(output, format='JPEG', quality=85)
+            prepared.append((photo['name'], 'image/jpeg', output.getvalue()))
+        except (UnidentifiedImageError, OSError, binascii.Error, Image.DecompressionBombError, Image.DecompressionBombWarning):
+            raise ValueError('Ein Foto ist beschädigt oder hat mehr als 20 Megapixel. Bitte wähle eine kleinere JPG-, PNG- oder WebP-Datei.') from None
+    return prepared
+
+
+def can_view_job(user, job):
+    return user and (user['role'] == 'admin' or
+        (user['role'] == 'provider' and job['provider_id'] == user['id']) or
+        (user['role'] == 'customer' and (job['customer_id'] == user['id'] or
+         (job['customer_id'] is None and job['contact_email'] == user['email']))))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -109,9 +189,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def payload(self):
+    def payload(self, limit=50000):
         size = int(self.headers.get('Content-Length', '0'))
-        if size < 0 or size > 50000:
+        if size < 0 or size > limit:
             raise ValueError('Anfrage ist zu groß.')
         data = json.loads(self.rfile.read(size) or b'{}')
         if not isinstance(data, dict):
@@ -167,7 +247,7 @@ class Handler(BaseHTTPRequestHandler):
                     providers = [public_user(x) for x in db.execute("SELECT * FROM users WHERE role='provider' ORDER BY company,name")]
                     return self.respond(200, {'providers': providers})
                 if method == 'POST' and path == '/api/jobs':
-                    data = self.payload()
+                    data = self.payload(MAX_JOB_PAYLOAD)
                     if user and user['role'] != 'customer':
                         return self.respond(403, {'error': 'Nur Kunden können Anfragen stellen.'})
                     category = str(data.get('category', '')).strip()[:80]
@@ -180,10 +260,34 @@ class Handler(BaseHTTPRequestHandler):
                     if not category or not title or len(description) < 15 or len(postal_code) != 5 or not postal_code.isdigit() or not city or not contact_name or '@' not in contact_email:
                         return self.respond(400, {'error': 'Bitte alle Pflichtfelder korrekt ausfüllen.'})
                     details_json = request_details(data.get('details', {}))
+                    photos = prepare_photos(data.get('photos', []))
                     cur = db.execute('''INSERT INTO jobs(customer_id,category,title,description,postal_code,city,address,desired_date,contact_name,contact_email,details_json)
                         VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (user['id'] if user else None, category, title, description, postal_code, city,
                         str(data.get('address', '')).strip()[:200], str(data.get('desired_date', '')).strip()[:20], contact_name, contact_email, details_json))
+                    db.executemany('INSERT INTO job_photos(job_id,name,mime,data) VALUES (?,?,?,?)',
+                                   [(cur.lastrowid, name, mime, photo_data) for name, mime, photo_data in photos])
+                    db.commit()
                     return self.respond(201, {'id': cur.lastrowid, 'message': 'Anfrage eingegangen.'})
+                if method == 'GET' and path.startswith('/api/jobs/') and '/photos/' in path:
+                    parts = path.split('/')
+                    if len(parts) != 6 or not parts[3].isdigit() or not parts[5].isdigit():
+                        return self.respond(404, {'error': 'Foto nicht gefunden.'})
+                    if not user:
+                        return self.respond(401, {'error': 'Bitte anmelden.'})
+                    job = db.execute('SELECT * FROM jobs WHERE id=?', (int(parts[3]),)).fetchone()
+                    if not job or not can_view_job(user, job):
+                        return self.respond(403, {'error': 'Keine Berechtigung.'})
+                    photo = db.execute('SELECT mime,data FROM job_photos WHERE id=? AND job_id=?', (int(parts[5]), job['id'])).fetchone()
+                    if not photo:
+                        return self.respond(404, {'error': 'Foto nicht gefunden.'})
+                    self.send_response(200)
+                    self.send_header('Content-Type', photo['mime'])
+                    self.send_header('Content-Length', str(len(photo['data'])))
+                    self.send_header('Cache-Control', 'no-store')
+                    self.send_header('X-Content-Type-Options', 'nosniff')
+                    self.end_headers()
+                    self.wfile.write(photo['data'])
+                    return
                 if method == 'GET' and path == '/api/jobs':
                     if not user:
                         return self.respond(401, {'error': 'Bitte anmelden.'})
@@ -193,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
                         rows = db.execute('SELECT * FROM jobs WHERE provider_id=? ORDER BY id DESC', (user['id'],)).fetchall()
                     else:
                         rows = db.execute('SELECT * FROM jobs WHERE customer_id=? OR (customer_id IS NULL AND contact_email=?) ORDER BY id DESC', (user['id'], user['email'])).fetchall()
-                    return self.respond(200, {'jobs': [public_job(row) for row in rows]})
+                    return self.respond(200, {'jobs': [public_job(row, db) for row in rows]})
                 if method == 'PATCH' and path.startswith('/api/jobs/'):
                     if not user:
                         return self.respond(401, {'error': 'Bitte anmelden.'})

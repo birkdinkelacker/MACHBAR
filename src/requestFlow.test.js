@@ -1,49 +1,55 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { SERVICES, EMPTY_FORM, selectService, validateStep, buildPayload } from './requestFlow.js'
-
-const valid = () => ({...EMPTY_FORM,category:'Entrümpelung',postal_code:'69412',city:'Eberbach',work:['Wohnung','Garage'],amount:'60',detail:'Über Treppen',timing:'Ich bin flexibel',contact_name:'Testkunde',contact_email:'test@example.com'})
-
-test('Every service can produce a complete request with its own questions',()=>{
-  for(const [category,service] of Object.entries(SERVICES)){
-    const form={...valid(),category,work:[service.choices[0]],detail:service.detailChoices[0],destination_postal_code:'69115',destination_city:'Heidelberg',description:'Bitte vorab die Details gemeinsam besprechen.'}
-    for(let step=0;step<8;step++)assert.equal(validateStep(step,form,null,'2026-09-21'),'')
-    const payload=buildPayload(form,null)
-    assert.ok(payload.description.includes(service.choices[0]))
-    assert.ok(payload.description.includes(service.detailChoices[0]))
-    assert.ok(payload.description.includes('60 '+service.unit))
-    if(category==='Umzug')assert.ok(payload.description.includes('69115 Heidelberg'))
+import {SERVICES,GROUPS,EMPTY_FORM,selectService,selectedGroups,needsDestination,validateStep,buildPayload} from './requestFlow.js'
+const valid=()=>({...EMPTY_FORM,services:['Wohnung entrümpeln','Fensterreinigung'],scopes:{Entrümpelung:{amount:'60',detail:'Über Treppen'},Reinigung:{amount:'20',detail:'Einmalig'}},postal_code:'69412',city:'Eberbach',timing:'Ich bin flexibel',contact_name:'Testkunde',contact_email:'test@example.com'})
+test('All specific services can be requested, including optional estimates',()=>{
+  assert.equal(Object.keys(SERVICES).length,35)
+  for(const service of Object.keys(SERVICES)){
+    const form={...valid(),services:[service],scopes:{},destination_postal_code:'69115',destination_city:'Heidelberg',description:'Bitte die Arbeiten vorab besprechen.'}
+    for(let step=0;step<7;step++)assert.equal(validateStep(step,form,null,'2026-09-22'),'')
+    assert.deepEqual(buildPayload(form,null).details.services,[service])
   }
 })
-
-test('Changing services removes incompatible answers and retains contact and place',()=>{
-  const form=selectService({...valid(),destination_city:'Heidelberg'},'Reinigung')
-  assert.deepEqual(form.work,[])
-  assert.equal(form.detail,'')
-  assert.equal(form.destination_city,'')
-  assert.equal(form.city,'Eberbach')
-  assert.equal(form.contact_email,'test@example.com')
-  assert.ok(validateStep(2,form,null,'2026-09-21'))
-  assert.ok(validateStep(3,{...form,detail:'Über Treppen'},null,'2026-09-21'))
+test('Cross-category selection preserves answers; removing the last item clears only its group',()=>{
+  const form=selectService(valid(),'Wände und Decken streichen')
+  assert.equal(form.services.length,3)
+  assert.equal(form.scopes.Reinigung.detail,'Einmalig')
+  const removed=selectService(form,'Wohnung entrümpeln')
+  assert.equal(removed.scopes.Entrümpelung,undefined)
+  assert.equal(removed.scopes.Reinigung.amount,'20')
+  assert.equal(removed.city,'Eberbach')
+  const twoInGroup=selectService(valid(),'Treppenhausreinigung')
+  assert.equal(selectService(twoInGroup,'Fensterreinigung').scopes.Reinigung.detail,'Einmalig')
 })
-
-test('Required answers and invalid dates are rejected; optional estimates and notes can be skipped',()=>{
-  const form=valid()
-  assert.ok(validateStep(1,{...form,postal_code:'123'},null,'2026-09-21'))
-  assert.ok(validateStep(2,{...form,work:[]},null,'2026-09-21'))
-  assert.ok(validateStep(3,{...form,amount:'-1'},null,'2026-09-21'))
-  assert.ok(validateStep(6,{...form,contact_email:'invalid@'},null,'2026-09-21'))
-  assert.equal(validateStep(3,{...form,amount:''},null,'2026-09-21'),'')
-  assert.equal(validateStep(5,form,null,'2026-09-21'),'')
-  for(const date of ['', '2026-01-01','2026-02-30','2026-13-01'])assert.ok(validateStep(4,{...form,timing:'An einem bestimmten Tag',desired_date:date},null,'2026-01-10'))
-  assert.equal(validateStep(4,{...form,timing:'An einem bestimmten Tag',desired_date:'2026-09-21'},null,'2026-09-21'),'')
+test('Destination is required only for a move or furniture transport and is cleared on deselection',()=>{
+  const moving=selectService(valid(),'Möbeltransport')
+  assert.ok(needsDestination(moving))
+  assert.ok(validateStep(1,moving,null,'2026-09-22'))
+  const complete={...moving,destination_postal_code:'69115',destination_city:'Heidelberg'}
+  assert.equal(validateStep(1,complete,null,'2026-09-22'),'')
+  assert.ok(buildPayload(complete,null).description.includes('69115 Heidelberg'))
+  const removed=selectService(complete,'Möbeltransport')
+  assert.equal(removed.destination_city,'')
+  assert.equal(needsDestination(selectService(removed,'Tragehilfe')),false)
 })
-
-test('Payload preserves answers, trims contact, and never sends a stale exact date',()=>{
-  const payload=buildPayload({...valid(),desired_date:'2026-10-01',description:'  Zugang über den Hof.  ',contact_email:' test@example.com '},null)
+test('Payload preserves every selection and per-group answers without a stale date',()=>{
+  const form={...valid(),desired_date:'2026-10-01',description:'  Zugang über den Hof.  '}
+  const payload=buildPayload(form,null)
+  assert.equal(payload.category,'Mehrere Leistungen')
+  assert.deepEqual(payload.details.services,form.services)
+  assert.equal(payload.details.scopes.length,2)
+  for(const answer of ['Wohnung entrümpeln','Fensterreinigung','60 m²','20 m²','Über Treppen','Einmalig','Zugang über den Hof.'])assert.ok(payload.description.includes(answer))
   assert.equal(payload.desired_date,'')
-  assert.equal(payload.contact_email,'test@example.com')
-  assert.equal(payload.details.notes,'Zugang über den Hof.')
-  for(const answer of ['Wohnung, Garage','60 m²','Über Treppen','Ich bin flexibel','Zugang über den Hof.'])assert.ok(payload.description.includes(answer))
   assert.ok(!payload.description.includes('2026-10-01'))
+  const all={...form,services:Object.keys(SERVICES),scopes:Object.fromEntries(Object.entries(GROUPS).map(([group,c])=>[group,{amount:'1000000',detail:c.detailChoices[0]}]))}
+  assert.ok(buildPayload(all,null).description.length<5000)
+})
+test('Empty selections, invalid contacts, past dates and impossible dates are rejected',()=>{
+  const form=valid()
+  assert.ok(validateStep(0,{...form,services:[]},null,'2026-09-22'))
+  assert.ok(validateStep(0,{...form,services:['invalid']},null,'2026-09-22'))
+  assert.ok(validateStep(5,{...form,contact_email:'invalid@'},null,'2026-09-22'))
+  assert.ok(validateStep(2,{...form,scopes:{Reinigung:{amount:'-1'}}},null,'2026-09-22'))
+  for(const date of ['2026-02-30','2026-13-01','2026-01-01'])assert.ok(validateStep(3,{...form,timing:'An einem bestimmten Tag',desired_date:date},null,'2026-09-22'))
+  assert.ok(validateStep(4,{...form,services:['Anderes Anliegen']},null,'2026-09-22'))
 })

@@ -1,10 +1,13 @@
 import json
+import base64
+import io
 import os
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from PIL import Image
 
 try:
     from . import server
@@ -76,6 +79,45 @@ class APITest(unittest.TestCase):
         self.assertEqual(saved['description'], body['description'])
         for invalid in [[], {'work': 'invalid'}, {'notes': 'x' * 2001}, {'work': [None]}]:
             self.assertEqual(self.call('/api/jobs', 'POST', {**body, 'details': invalid})[0], 400)
+
+    def test_multiple_services_photos_and_access_control(self):
+        def register(name, role='customer'):
+            return self.call('/api/auth/register', 'POST', {'name': name, 'email': name+'@example.com', 'password': 'test-password-123', 'role': role})[1]
+        owner, other, provider = register('owner'), register('other'), register('provider', 'provider')
+        admin = self.call('/api/auth/login', 'POST', {'email': 'admin@example.com', 'password': 'admin-password-123'})[1]
+        photo_buffer = io.BytesIO()
+        Image.new('RGB', (20, 20), 'red').save(photo_buffer, format='PNG')
+        photo = {'name': 'auftrag.png', 'data': 'data:image/png;base64,'+base64.b64encode(photo_buffer.getvalue()).decode()}
+        services = ['Wohnung entrümpeln', 'Fensterreinigung', 'Wände und Decken streichen']
+        details = {'services': services, 'work': services, 'scopes': [{'group': 'Reinigung', 'amount': '20 m²', 'detail_label': 'Häufigkeit', 'detail': 'Einmalig'}]}
+        body = {'category': 'Mehrere Leistungen', 'title': 'Wohnung vorbereiten', 'description': 'Entrümpelung, Reinigung und Malerarbeiten.', 'postal_code': '69412', 'city': 'Eberbach', 'details': details, 'photos': [photo]}
+        status, job = self.call('/api/jobs', 'POST', body, owner['token'])
+        self.assertEqual(status, 201)
+        saved = self.call('/api/jobs', token=owner['token'])[1]['jobs'][0]
+        self.assertEqual(saved['details']['services'], services)
+        self.assertEqual(saved['details']['scopes'], details['scopes'])
+        self.assertEqual(len(saved['photos']), 1)
+        url = saved['photos'][0]['url']
+        self.assertEqual(self.call(url)[0], 401)
+        self.assertEqual(self.call(url, token=other['token'])[0], 403)
+        self.assertEqual(self.call(url, token=provider['token'])[0], 403)
+        self.call(f"/api/jobs/{job['id']}", 'PATCH', {'provider_id': provider['user']['id']}, admin['token'])
+        for account in [owner, provider, admin]:
+            with urlopen(Request(self.base+url, headers={'Authorization': 'Bearer '+account['token']})) as response:
+                self.assertEqual(response.headers['Content-Type'], 'image/jpeg')
+                with Image.open(io.BytesIO(response.read())) as image:
+                    self.assertEqual(image.size, (20, 20))
+                    self.assertEqual(len(image.getexif()), 0)
+        # A bad photo rejects the whole request, even after an earlier valid photo.
+        for photos in [[photo]*7, [photo, {**photo, 'data': 'data:image/png;base64,bm90YW5pbWFnZQ=='}], [{**photo, 'data': 'data:image/svg+xml;base64,PHN2Zz4='}]]:
+            self.assertEqual(self.call('/api/jobs', 'POST', {**body, 'photos': photos}, owner['token'])[0], 400)
+        self.assertEqual(len(self.call('/api/jobs', token=owner['token'])[1]['jobs']), 1)
+        with server.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM job_photos').fetchone()[0], 1)
+
+    def test_photo_byte_limit(self):
+        with self.assertRaises(ValueError):
+            server.prepare_photos([{'name': 'large.png', 'data': 'data:image/png;base64,'+base64.b64encode(b'x'*(server.MAX_PHOTO_BYTES+1)).decode()}])
 
 
 if __name__ == '__main__':
