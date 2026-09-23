@@ -20,8 +20,9 @@ ROOT = Path(__file__).resolve().parent
 DIST = ROOT.parent / 'dist'
 DB = Path(os.environ.get('MACHBAR_DB', ROOT / 'machbar.db'))
 HOST = os.environ.get('MACHBAR_HOST', '127.0.0.1')
-PORT = int(os.environ.get('MACHBAR_PORT', '8000'))
+PORT = int(os.environ.get('MACHBAR_PORT', os.environ.get('PORT', '8000')))
 STATUSES = {'open', 'assigned', 'in_progress', 'done'}
+ADMIN_EMAIL = 'info.machbar@gmx.de'
 MAX_PHOTOS = 6
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
 MAX_JOB_PAYLOAD = 42 * 1024 * 1024
@@ -44,6 +45,7 @@ def connect():
 
 
 def init_db():
+    DB.parent.mkdir(parents=True, exist_ok=True)
     with connect() as db:
         db.executescript('''
         CREATE TABLE IF NOT EXISTS users (
@@ -70,11 +72,17 @@ def init_db():
             name TEXT NOT NULL, mime TEXT NOT NULL, data BLOB NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_photos_job ON job_photos(job_id);
+        CREATE TABLE IF NOT EXISTS job_admin_notes (
+            job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+            note TEXT NOT NULL DEFAULT ''
+        );
         ''')
         if 'details_json' not in {row['name'] for row in db.execute('PRAGMA table_info(jobs)')}:
             db.execute("ALTER TABLE jobs ADD COLUMN details_json TEXT NOT NULL DEFAULT '{}'")
-        admin_email = os.environ.get('MACHBAR_ADMIN_EMAIL', '').strip().lower()
+        admin_email = ADMIN_EMAIL
         admin_password = os.environ.get('MACHBAR_ADMIN_PASSWORD', '')
+        db.execute("UPDATE users SET role='customer' WHERE role='admin' AND lower(email)<>?", (ADMIN_EMAIL,))
+        db.execute("UPDATE users SET role='admin',email=? WHERE lower(email)=?", (ADMIN_EMAIL, ADMIN_EMAIL))
         if admin_email and admin_password and not db.execute('SELECT id FROM users WHERE email=?', (admin_email,)).fetchone():
             salt = secrets.token_hex(16)
             db.execute('INSERT INTO users(email,name,company,role,salt,password_hash) VALUES (?,?,?,?,?,?)',
@@ -87,6 +95,10 @@ def hash_password(password, salt):
 
 def public_user(row):
     return {key: row[key] for key in ('id', 'email', 'name', 'company', 'role')}
+
+
+def is_admin(user):
+    return bool(user and user['role'] == 'admin' and user['email'].strip().lower() == ADMIN_EMAIL)
 
 
 def public_job(row, db):
@@ -172,7 +184,7 @@ def prepare_photos(photos):
 
 
 def can_view_job(user, job):
-    return user and (user['role'] == 'admin' or
+    return user and (is_admin(user) or
         (user['role'] == 'provider' and job['provider_id'] == user['id']) or
         (user['role'] == 'customer' and (job['customer_id'] == user['id'] or
          (job['customer_id'] is None and job['contact_email'] == user['email']))))
@@ -223,6 +235,8 @@ class Handler(BaseHTTPRequestHandler):
                     name = str(data.get('name', '')).strip()
                     password = str(data.get('password', ''))
                     role = data.get('role', 'customer')
+                    if email == ADMIN_EMAIL:
+                        return self.respond(403, {'error': 'Dieses Konto ist für die Administration reserviert. Bitte anmelden oder die lokale Admin-Ersteinrichtung verwenden.'})
                     if not email or '@' not in email or len(email) > 254 or not name or len(name) > 100 or len(password) < 8 or role not in ('customer', 'provider'):
                         return self.respond(400, {'error': 'Bitte gültige Angaben und ein Passwort mit mindestens 8 Zeichen eingeben.'})
                     salt = secrets.token_hex(16)
@@ -241,8 +255,18 @@ class Handler(BaseHTTPRequestHandler):
                     return self.login_response(db, found)
                 if method == 'GET' and path == '/api/auth/me':
                     return self.respond(200, {'user': public_user(user)}) if user else self.respond(401, {'error': 'Bitte anmelden.'})
+                if method == 'GET' and path == '/api/admin/dashboard':
+                    if not is_admin(user):
+                        return self.respond(403, {'error': 'Kein Zugriff auf die Administration.'})
+                    notes = {row['job_id']: row['note'] for row in db.execute('SELECT * FROM job_admin_notes')}
+                    jobs = [{**public_job(row, db), 'admin_note': notes.get(row['id'], '')}
+                            for row in db.execute('SELECT * FROM jobs ORDER BY id DESC').fetchall()]
+                    providers = [public_user(row) for row in db.execute("SELECT * FROM users WHERE role='provider' ORDER BY company,name")]
+                    customers = db.execute("SELECT COUNT(*) FROM users WHERE role='customer'").fetchone()[0]
+                    return self.respond(200, {'jobs': jobs, 'providers': providers, 'customers': customers,
+                                             'updated_at': datetime.now(timezone.utc).isoformat()})
                 if method == 'GET' and path == '/api/providers':
-                    if not user or user['role'] != 'admin':
+                    if not is_admin(user):
                         return self.respond(403, {'error': 'Keine Berechtigung.'})
                     providers = [public_user(x) for x in db.execute("SELECT * FROM users WHERE role='provider' ORDER BY company,name")]
                     return self.respond(200, {'providers': providers})
@@ -291,8 +315,10 @@ class Handler(BaseHTTPRequestHandler):
                 if method == 'GET' and path == '/api/jobs':
                     if not user:
                         return self.respond(401, {'error': 'Bitte anmelden.'})
-                    if user['role'] == 'admin':
+                    if is_admin(user):
                         rows = db.execute('SELECT * FROM jobs ORDER BY id DESC').fetchall()
+                    elif user['role'] == 'admin':
+                        return self.respond(403, {'error': 'Keine Berechtigung.'})
                     elif user['role'] == 'provider':
                         rows = db.execute('SELECT * FROM jobs WHERE provider_id=? ORDER BY id DESC', (user['id'],)).fetchall()
                     else:
@@ -309,16 +335,23 @@ class Handler(BaseHTTPRequestHandler):
                     if not job:
                         return self.respond(404, {'error': 'Auftrag nicht gefunden.'})
                     data = self.payload()
-                    if user['role'] == 'admin':
+                    if is_admin(user):
+                        if 'status' in data and (not isinstance(data['status'], str) or data['status'] not in STATUSES):
+                            return self.respond(400, {'error': 'Ungültiger Status.'})
+                        if 'admin_note' in data and (not isinstance(data['admin_note'], str) or len(data['admin_note']) > 5000):
+                            return self.respond(400, {'error': 'Interne Notizen dürfen höchstens 5.000 Zeichen enthalten.'})
                         if 'provider_id' in data:
                             provider_id = data['provider_id']
-                            if provider_id is not None and not db.execute("SELECT id FROM users WHERE id=? AND role='provider'", (provider_id,)).fetchone():
+                            if provider_id is not None and (type(provider_id) is not int or not db.execute("SELECT id FROM users WHERE id=? AND role='provider'", (provider_id,)).fetchone()):
                                 return self.respond(400, {'error': 'Ungültiger Dienstleister.'})
-                            db.execute('UPDATE jobs SET provider_id=?,status=? WHERE id=?', (provider_id, 'assigned' if provider_id else 'open', job_id))
+                            next_status = data.get('status', job['status'] if job['status'] in ('in_progress', 'done') else 'assigned' if provider_id else 'open')
+                            db.execute('UPDATE jobs SET provider_id=?,status=? WHERE id=?', (provider_id, next_status, job_id))
                         if 'status' in data:
                             if data['status'] not in STATUSES:
                                 return self.respond(400, {'error': 'Ungültiger Status.'})
                             db.execute('UPDATE jobs SET status=? WHERE id=?', (data['status'], job_id))
+                        if 'admin_note' in data:
+                            db.execute('INSERT INTO job_admin_notes(job_id,note) VALUES (?,?) ON CONFLICT(job_id) DO UPDATE SET note=excluded.note', (job_id, data['admin_note'].strip()))
                     elif user['role'] == 'provider' and job['provider_id'] == user['id']:
                         if data.get('status') not in ('assigned', 'in_progress', 'done'):
                             return self.respond(400, {'error': 'Ungültiger Status.'})
