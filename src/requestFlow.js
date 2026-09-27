@@ -53,7 +53,25 @@ export const GROUPS = {
     detailChoices: ['Ebenerdig', 'Über Treppen', 'Mit einem Aufzug', 'Noch unklar'],
     placeholder: 'Zum Beispiel: Umzug einer Zweizimmerwohnung. Ein Kleiderschrank muss abgebaut werden.',
   },
-  'Sonstiges': {
+  'Elektrik': {
+    description: 'Beleuchtung, Anschlüsse und Elektroinstallation', icon: 'bolt',
+    amountLabel: 'Anzahl der Anschlüsse oder Geräte', unit: 'Stück',
+    detailLabel: 'Worum geht es?',
+    detailChoices: ['Neuinstallation', 'Austausch', 'Fehlersuche oder Reparatur', 'Noch abzustimmen'],
+  },
+  'Montage': {
+    description: 'Möbel, Küche und Befestigungen', icon: 'wrench',
+    amountLabel: 'Anzahl der zu montierenden Teile', unit: 'Stück',
+    detailLabel: 'Ist das Material vorhanden?',
+    detailChoices: ['Alles vorhanden', 'Teilweise vorhanden', 'Der Dienstleister soll es mitbringen', 'Noch abzustimmen'],
+  },
+  'Bad & Sanitär': {
+    description: 'Armaturen, Sanitäranlagen und Wasseranschlüsse', icon: 'droplet',
+    amountLabel: 'Anzahl der betroffenen Anlagen oder Anschlüsse', unit: 'Stück',
+    detailLabel: 'Welche Unterstützung brauchst du?',
+    detailChoices: ['Neuinstallation', 'Austausch', 'Reparatur', 'Noch abzustimmen'],
+  },
+  'Weitere': {
     description: 'Dein Anliegen passt in keine Kategorie', icon: 'message',
     question: 'Worum geht es bei deinem Anliegen?',
     choices: ['Arbeiten im Gebäude', 'Arbeiten im Außenbereich', 'Mehrere Leistungen', 'Beratung zum Vorhaben'],
@@ -69,14 +87,19 @@ const catalog = {
   Reinigung: ['Wohnungsreinigung', 'Treppenhausreinigung', 'Fensterreinigung', 'Büro- und Gewerbereinigung', 'Bauendreinigung', 'Terrassen- und Hofreinigung'],
   Renovierung: ['Wände und Decken streichen', 'Tapezieren', 'Laminat oder Vinyl verlegen', 'Wände ausbessern', 'Tapeten entfernen', 'Silikonfugen erneuern'],
   Gartenpflege: ['Rasen mähen', 'Hecken schneiden', 'Beete pflegen', 'Laub entfernen', 'Garten aufräumen', 'Grünschnitt entsorgen'],
-  Hausmeisterservice: ['Objektkontrolle', 'Kleinreparaturen', 'Möbel montieren', 'Mülltonnenservice', 'Winterdienst', 'Regelmäßige Objektbetreuung'],
+  Hausmeisterservice: ['Objektkontrolle', 'Kleinreparaturen', 'Mülltonnenservice', 'Winterdienst', 'Regelmäßige Objektbetreuung'],
   Umzug: ['Kompletter Umzug', 'Möbeltransport', 'Tragehilfe', 'Umzugskartons packen'],
-  Sonstiges: ['Anderes Anliegen'],
+  Elektrik: ['Leuchten anschließen', 'Steckdosen und Schalter installieren', 'Elektroherd anschließen', 'Elektroleitungen verlegen', 'Elektrische Fehler beheben', 'Elektroinstallation prüfen'],
+  Montage: ['Möbel montieren', 'Küche montieren', 'Regale und Wandhalterungen befestigen', 'Gardinenstangen montieren', 'Türen einbauen'],
+  'Bad & Sanitär': ['Armaturen austauschen', 'Waschbecken montieren', 'WC montieren', 'Dusche oder Badewanne einbauen', 'Wasseranschlüsse installieren', 'Undichtigkeiten beheben', 'Abfluss reinigen'],
+  Weitere: ['Rollläden reparieren', 'Schlösser austauschen', 'Anderes Anliegen'],
 }
 export const SERVICES = Object.fromEntries(Object.entries(catalog).flatMap(([group,labels])=>labels.map(label=>[label,{group,icon:GROUPS[group].icon}])))
 export const STEPS = ['Leistungen', 'Ort', 'Umfang', 'Termin', 'Details', 'Kontakt', 'Übersicht & Fotos']
 export const TIMINGS = ['So bald wie möglich', 'In den nächsten 2 Wochen', 'In den nächsten 1–3 Monaten', 'An einem bestimmten Tag', 'Ich bin flexibel']
-export const EMPTY_FORM = {services:[],scopes:{},postal_code:'',city:'',address:'',destination_postal_code:'',destination_city:'',timing:'',desired_date:'',description:'',contact_name:'',contact_email:''}
+export const WEEKDAYS = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag']
+export const EMPTY_FORM = {services:[],scopes:{},postal_code:'',city:'',address:'',destination_postal_code:'',destination_city:'',timing:'',desired_date:'',availability:[],description:'',contact_name:'',contact_email:'',contact_phone:''}
+export const availabilityText = slots => (slots||[]).map(s=>`${s.day}: ${s.from}–${s.to} Uhr`).join(' · ')
 export const selectedGroups = form => [...new Set(form.services.map(name=>SERVICES[name]?.group).filter(Boolean))]
 export const needsDestination = form => form.services.some(name=>['Kompletter Umzug','Möbeltransport'].includes(name))
 
@@ -103,13 +126,17 @@ export function validateStep(step, form, user, today) {
   }
   if(step===3){
     if(!TIMINGS.includes(form.timing))return 'Bitte wähle einen Zeitraum aus.'
+    const slots=form.availability||[]
+    if(slots.some(s=>!WEEKDAYS.includes(s.day)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.from)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.to)||s.from>=s.to))return 'Bitte gib für jeden gewählten Wochentag eine gültige Start- und Endzeit an. Die Endzeit muss nach der Startzeit liegen.'
     if(form.timing==='An einem bestimmten Tag'){
       const date=new Date(form.desired_date+'T12:00:00Z')
       if(!/^\d{4}-\d{2}-\d{2}$/.test(form.desired_date)||!Number.isFinite(date.getTime())||date.toISOString().slice(0,10)!==form.desired_date||form.desired_date<today)return 'Bitte wähle einen heutigen oder zukünftigen Termin.'
+      if(slots.length&&!slots.some(s=>s.day===WEEKDAYS[(date.getUTCDay()+6)%7]))return 'Dein Wunschtermin passt nicht zu den ausgewählten Wochentagen. Bitte passe den Tag oder deine Verfügbarkeit an.'
     }
   }
   if(step===4&&form.services.includes('Anderes Anliegen')&&form.description.trim().length<15)return 'Beschreibe dein weiteres Anliegen bitte mit mindestens 15 Zeichen.'
   if(step===5&&!user){
+    if(form.contact_phone&&(!/^\+?[0-9 ()/.-]+$/.test(form.contact_phone.trim())||form.contact_phone.replace(/[^0-9]/g,'').length<7||form.contact_phone.replace(/[^0-9]/g,'').length>15))return 'Bitte eine gültige Telefonnummer angeben oder das Feld freilassen.'
     if(form.contact_name.trim().length<2)return 'Bitte gib deinen Namen ein.'
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contact_email.trim()))return 'Bitte gib eine gültige E-Mail-Adresse ein.'
   }
@@ -120,7 +147,7 @@ export function buildPayload(form,user){
   const groups=selectedGroups(form)
   const date=form.timing==='An einem bestimmten Tag'?form.desired_date:''
   const scopes=groups.map(group=>({group,amount:form.scopes[group]?.amount?`${form.scopes[group].amount} ${GROUPS[group].unit}`:'',detail_label:GROUPS[group].detailLabel,detail:form.scopes[group]?.detail||''}))
-  const details={work:form.services,services:form.services,scopes,timing:form.timing,destination:needsDestination(form)?`${form.destination_postal_code} ${form.destination_city.trim()}`:'',notes:form.description.trim()}
+  const details={work:form.services,services:form.services,scopes,timing:form.timing,availability:form.availability||[],destination:needsDestination(form)?`${form.destination_postal_code} ${form.destination_city.trim()}`:'',notes:form.description.trim()}
   const description=[`Leistungen: ${form.services.join(', ')}`,...scopes.filter(s=>s.amount||s.detail).map(s=>`${s.group}: ${[s.amount,s.detail&&`${s.detail_label} ${s.detail}`].filter(Boolean).join(' · ')}`),details.destination&&`Zielort: ${details.destination}`,`Zeitraum: ${details.timing}${date?` (${date})`:''}`,details.notes&&`Zusätzliche Angaben: ${details.notes}`].filter(Boolean).join('\n')
-  return {category:groups.length===1?groups[0]:'Mehrere Leistungen',title:(form.services.length>2?`${form.services[0]} + ${form.services.length-1} weitere Leistungen`:form.services.join(' & ')).slice(0,120),description,postal_code:form.postal_code,city:form.city.trim(),address:form.address.trim(),desired_date:date,contact_name:user?.name||form.contact_name.trim(),contact_email:user?.email||form.contact_email.trim(),details}
+  return {category:groups.length===1?groups[0]:'Mehrere Leistungen',title:(form.services.length>2?`${form.services[0]} + ${form.services.length-1} weitere Leistungen`:form.services.join(' & ')).slice(0,120),description:description+(details.availability.length?`\nVerfügbarkeit (Ortszeit): ${availabilityText(details.availability)}`:''),postal_code:form.postal_code,city:form.city.trim(),address:form.address.trim(),desired_date:date,contact_name:user?.name||form.contact_name.trim(),contact_email:user?.email||form.contact_email.trim(),contact_phone:user?.phone||form.contact_phone?.trim()||'',details}
 }

@@ -1,9 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {SERVICES,GROUPS,EMPTY_FORM,selectService,selectedGroups,needsDestination,validateStep,buildPayload} from './requestFlow.js'
+
+test('Availability survives payload and rejects incomplete or conflicting time windows',()=>{
+  const form={...valid(),availability:[{day:'Montag',from:'09:00',to:'12:30'},{day:'Freitag',from:'14:00',to:'18:00'}]}
+  assert.equal(validateStep(3,form,null,'2026-09-25'),'')
+  const payload=buildPayload(form,null)
+  assert.deepEqual(payload.details.availability,form.availability)
+  assert.ok(payload.description.includes('Montag: 09:00–12:30 Uhr'))
+  for(const slot of [{day:'Montag',from:'',to:''},{day:'Montag',from:'12:00',to:'11:00'},{day:'Montag',from:'24:00',to:'25:00'}])assert.ok(validateStep(3,{...form,availability:[slot]},null,'2026-09-25'))
+  assert.ok(validateStep(3,{...form,timing:'An einem bestimmten Tag',desired_date:'2026-09-26'},null,'2026-09-25'))
+  assert.equal(validateStep(3,{...form,timing:'An einem bestimmten Tag',desired_date:'2026-09-28'},null,'2026-09-25'),'')
+})
 const valid=()=>({...EMPTY_FORM,services:['Wohnung entrümpeln','Fensterreinigung'],scopes:{Entrümpelung:{amount:'60',detail:'Über Treppen'},Reinigung:{amount:'20',detail:'Einmalig'}},postal_code:'69412',city:'Eberbach',timing:'Ich bin flexibel',contact_name:'Testkunde',contact_email:'test@example.com'})
 test('All specific services can be requested, including optional estimates',()=>{
-  assert.equal(Object.keys(SERVICES).length,35)
+  for(const group of ['Elektrik','Montage','Bad & Sanitär','Weitere'])assert.ok(Object.values(SERVICES).some(s=>s.group===group))
   for(const service of Object.keys(SERVICES)){
     const form={...valid(),services:[service],scopes:{},destination_postal_code:'69115',destination_city:'Heidelberg',description:'Bitte die Arbeiten vorab besprechen.'}
     for(let step=0;step<7;step++)assert.equal(validateStep(step,form,null,'2026-09-22'),'')

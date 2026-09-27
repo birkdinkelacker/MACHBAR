@@ -1,0 +1,14 @@
+**
+!package.json
+!package-lock.json
+!index.html
+!vite.config.js
+!src/
+!src/**
+!public/
+!public/**
+!backend/
+!backend/server.py
+!backend/create_admin.py
+!backend/requirements.txt
+!Dockerfile

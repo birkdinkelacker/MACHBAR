@@ -2,3 +2,30 @@
 @media(min-width:1400px){.ad-content{padding:40px 48px}.ad-table td{padding:21px 23px}}
 @media(max-width:1150px){.ad-sidebar{width:215px;padding:25px 15px}.ad-main{margin-left:215px}.ad-content{padding:25px}.ad-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.ad-two-cols{gap:18px}.ad-topbar{padding:0 25px}.ad-partner-grid{grid-template-columns:1fr 1fr}.ad-page-title h1{font-size:27px}.ad-filters{flex-wrap:wrap}.ad-filters .ad-search{flex-basis:100%}}
 @media(max-width:760px){.ad-shell{display:block}.ad-sidebar{position:static;width:auto;padding:18px;border-right:0;border-bottom:1px solid #e2e7d9}.ad-brand-caption{display:none}.ad-sidebar nav{display:flex;overflow:auto;margin-top:20px;gap:6px}.ad-sidebar nav button{white-space:nowrap;gap:7px;width:auto;padding:11px 9px;font-size:11px}.ad-sidebar nav button svg{width:16px}.ad-sidebar-bottom{margin:15px 0 0;padding-top:12px;flex-wrap:nowrap}.ad-sidebar-bottom>svg{display:none}.ad-sidebar-bottom span{font-size:10px}.ad-sidebar-bottom a,.ad-sidebar-bottom button{width:auto;padding:4px;font-size:10px;white-space:nowrap}.ad-sidebar-bottom small{font-size:9px}.ad-main{margin-left:0}.ad-topbar{display:none}.ad-content{padding:25px 18px}.ad-page-title{align-items:start;gap:10px}.ad-page-title h1{font-size:25px}.ad-page-title .ad-btn{padding:9px;font-size:10px;margin-top:23px}.ad-eyebrow{font-size:8px}.ad-kpis{gap:11px}.ad-kpi{padding:17px 15px}.ad-kpi strong{font-size:30px}.ad-kpi>span{font-size:11px;gap:6px}.ad-kpi svg{width:16px}.ad-kpi small{font-size:9px}.ad-two-cols{grid-template-columns:1fr}.ad-panel-head{padding:20px;align-items:start;flex-direction:column}.ad-panel-pad{padding:20px}.ad-partner-grid{grid-template-columns:1fr}.ad-filters{padding:18px}.ad-filters>label{flex:1;min-width:0}.ad-filters select{width:100%;font-size:11px}.ad-detail-body{grid-template-columns:1fr;padding:20px;gap:24px}.ad-detail-head{padding:20px}.ad-dialog{width:calc(100% - 20px);max-height:95vh}.ad-detail-head h2{font-size:20px}.ad-detail-actions{flex-wrap:wrap}.ad-chart{gap:5px}}
+.ad-delete-section{border-top:1px solid #e1e6db;margin-top:25px;padding-top:22px}.ad-delete-section h3{color:#ae2638;margin-bottom:10px}.ad-delete-section p{font-size:12px;line-height:1.7;overflow-wrap:anywhere;color:#775f62}.ad-delete-section .ad-detail-actions{margin-top:16px}.ad-delete-section .ad-text-btn{white-space:normal}
+.ad-coordination-intro{font-size:12px;line-height:1.6;color:#7f8c73;margin:-7px 0 22px}
+.ad-coordination-fields{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:12px}
+.ad-coordination-fields>label{min-width:0}
+.ad-coordination-fields>.ad-muted{grid-column:1/-1;margin-top:-10px}
+.ad-offer-compose{border-block:1px solid #e1e6db;padding:18px 0;margin-bottom:22px}
+.ad-coordination .ad-offer-toggle{display:flex;align-items:flex-start;gap:11px;margin:0;cursor:pointer;line-height:1.5}
+.ad-offer-toggle input{width:17px;height:17px;flex:none;margin:2px 0 0;accent-color:#d81d31;cursor:pointer}
+.ad-offer-toggle small{display:block;font-size:11px;line-height:1.6;font-weight:400;color:#7f8c73;margin-top:4px}
+.ad-coordination .offer-fields{margin-top:22px}
+.ad-coordination .offer-fields p{font-size:11px;line-height:1.7;color:#7f8c73}
+.ad-coordination .offer-slot{padding:12px;gap:9px;background:#fff}
+.ad-coordination .offer-slot label{margin:0;font-size:11px}
+.ad-coordination .offer-slot input{width:100%;min-width:0;padding:9px 7px}
+.ad-coordination .portal-text-btn{font-size:11px}
+.ad-coordination .ad-detail-actions>.ad-primary{white-space:normal;text-align:center}
+.ad-coordination .ad-detail-actions svg{flex:none}
+.ad-coordination button:disabled{opacity:.6;cursor:wait}
+.ad-coordination input:focus-visible{outline:2px solid #d81d31;outline-offset:2px}
+.ad-coordination input:disabled,.ad-coordination select:disabled{opacity:.65;cursor:not-allowed}
+.ad-offer-history{border-top:1px solid #e1e6db;margin-top:24px;padding-top:18px}
+.ad-offer-history summary{font-size:12px;font-weight:600;cursor:pointer;line-height:1.6}
+.ad-offer-history .offers{margin-bottom:0}
+.ad-offer-history .offer{padding:16px;margin-bottom:0}
+.ad-offer-history .offer h3{margin:0}
+@media(min-width:761px){.ad-detail-body{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr)}}
+@media(max-width:430px){.ad-coordination-fields{grid-template-columns:1fr;gap:0}.ad-detail-body .ad-coordination{padding:16px}.ad-coordination .ad-detail-actions{align-items:stretch}.ad-coordination .ad-detail-actions>.ad-primary{flex:1}}
