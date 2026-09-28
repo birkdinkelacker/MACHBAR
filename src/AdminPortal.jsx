@@ -1,3 +1,4 @@
+import {LegalLinks} from './LegalPages'
 import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowUpRight,
@@ -459,6 +460,7 @@ export default function AdminPortal({ user, request, Logo, onLogout, token }) {
             <LogOut size={16} />
             Abmelden
           </button>
+          <LegalLinks/>
         </div>
       </aside>
       <main className="ad-main">
