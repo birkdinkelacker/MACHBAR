@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://machbar-rose.vercel.app/sitemap.xml
+Sitemap: https://www.machbar-handwerk.de/sitemap.xml

@@ -1,6 +1,6 @@
 # MACHBAR auf Vercel und PythonAnywhere aktualisieren
 
-- Frontend: https://machbar-rose.vercel.app/
+- Frontend: https://www.machbar-handwerk.de/ (machbar-handwerk.de leitet auf die www-Adresse weiter)
 - Backend: https://birk.eu.pythonanywhere.com/
 - Repository: https://github.com/birkdinkelacker/MACHBAR
 
@@ -67,7 +67,7 @@ Der aktuelle WSGI-Einstieg unterstützt GET, POST, PATCH und DELETE sowie persö
 Im Web-Tab **Reload birk.eu.pythonanywhere.com** klicken. Danach prüfen:
 
 - https://birk.eu.pythonanywhere.com/api/health liefert `{"ok": true}`.
-- https://machbar-rose.vercel.app/api/health liefert ebenfalls `{"ok": true}`.
+- https://www.machbar-handwerk.de/api/health liefert ebenfalls `{"ok": true}`.
 - Adminportal: alle Auftragsstatus und der gemeinsame Bereich **Auftrag koordinieren** erscheinen.
 - Bei einem dafür angelegten Testauftrag ein Angebot samt Notiz speichern; anschließend im Kundenportal kontrollieren.
 
